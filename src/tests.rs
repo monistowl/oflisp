@@ -1,8 +1,12 @@
+//! Basic regression coverage for canonical printing and the reader
+//! grammar as described in `spec/core.md §2` and §11.
+
 use super::*;
 use std::rc::Rc;
 
 #[test]
 fn canonical_primitives() {
+    // Validate the textual surface required for persistence (`spec/core.md §11`).
     assert_eq!(Value::Nil.to_canonical(), "()");
     assert_eq!(Value::Int(42.into()).to_canonical(), "42");
     assert_eq!(Value::Str("hi\n\"".into()).to_canonical(), "\"hi\\n\\\"\"");
@@ -13,6 +17,7 @@ fn canonical_primitives() {
 
 #[test]
 fn reader_basic_atoms() {
+    // Ensure atoms round-trip through the reader (`spec/core.md §2.3`).
     let forms = read_all("42 'x \"hi\"").expect("read");
     assert_eq!(forms.len(), 3);
     assert!(matches!(forms[0], Value::Int(ref n) if n == &BigInt::from(42)));
@@ -22,6 +27,7 @@ fn reader_basic_atoms() {
 
 #[test]
 fn reader_bytes_and_symbols() {
+    // Verify dispatch and symbol package rules (`spec/core.md §2.2`).
     let src = "#u8(1 2 3) foo/bar |pkg name|/|sym+|";
     let forms = read_all(src).expect("read");
     assert_eq!(forms.len(), 3);
@@ -47,6 +53,7 @@ fn reader_bytes_and_symbols() {
 
 #[test]
 fn canonical_symbol_quoting() {
+    // Symbols requiring escapes must print in a reader-stable way (`spec/core.md §11`).
     let sym = Rc::new(Symbol::new("user", "has space"));
     assert_eq!(Value::Sym(sym).to_canonical(), "|has space|");
     let pkg_sym = Rc::new(Symbol::new("pkg", "weird|name"));
@@ -55,6 +62,7 @@ fn canonical_symbol_quoting() {
 
 #[test]
 fn canonical_lists() {
+    // Lists and dotted pairs print uniquely (`spec/core.md §11`).
     let list = Value::Pair(
         Rc::new(Value::Int(1.into())),
         Rc::new(Value::Pair(
@@ -70,6 +78,7 @@ fn canonical_lists() {
 
 #[test]
 fn canonical_error_and_closure() {
+    // Errors and closures print opaque handles consistent with `spec/core.md §11`.
     let err = Value::Error(Box::new(ErrorVal {
         code: Rc::new(Symbol::new("error", "arity")),
         message: "wrong arity".into(),

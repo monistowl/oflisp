@@ -1,6 +1,6 @@
 // OFLISP Reference VM (Rust) — v0.1
 // ------------------------------------------------------------
-// Rreference interpreter + bytecode VM for Operating Function LISP
+// Reference interpreter + bytecode VM for Operating Function LISP
 //
 
 use anyhow::{anyhow, Result};
@@ -14,6 +14,8 @@ use unicode_ident::{is_xid_continue, is_xid_start};
 
 // ------------------------- Utilities -------------------------
 
+/// Encode `n` using the unsigned LEB128 length format mandated by
+/// `spec/core.md §6` for canonical TLV payload sizing.
 fn uleb128_encode(mut n: u128) -> Vec<u8> {
     let mut out = Vec::new();
     loop {
@@ -30,6 +32,8 @@ fn uleb128_encode(mut n: u128) -> Vec<u8> {
     out
 }
 
+/// Decode an unsigned LEB128 integer while reporting how many bytes were
+/// consumed, as required for TLV lengths in `spec/core.md §6`.
 fn uleb128_decode(mut bytes: &[u8]) -> Result<(u128, usize)> {
     let mut result: u128 = 0;
     let mut shift = 0u32;
@@ -53,6 +57,8 @@ fn uleb128_decode(mut bytes: &[u8]) -> Result<(u128, usize)> {
     Ok((result, used))
 }
 
+/// Convert a `BigInt` into the minimal big-endian two's complement payload
+/// described in `spec/core.md §6.2`.
 fn be_twos_complement_from_bigint(n: &BigInt) -> Vec<u8> {
     // Minimal-width big-endian two's complement, with zero as 0x00.
     if n.is_zero() {
@@ -101,6 +107,8 @@ fn be_twos_complement_from_bigint(n: &BigInt) -> Vec<u8> {
     }
 }
 
+/// Reconstruct a `BigInt` from the canonical two's complement payload
+/// described in `spec/core.md §6.2`.
 fn be_twos_complement_to_bigint(bytes: &[u8]) -> BigInt {
     if bytes.is_empty() {
         return BigInt::zero();
@@ -128,6 +136,7 @@ fn be_twos_complement_to_bigint(bytes: &[u8]) -> BigInt {
 
 // ------------------------- Values ---------------------------
 
+/// Interned symbol identity as defined in `spec/core.md §3.1`.
 #[derive(Clone)]
 pub struct Symbol {
     pub package: String,
@@ -136,6 +145,7 @@ pub struct Symbol {
 }
 
 impl Symbol {
+    /// Create a symbol and derive its hash id per `spec/core.md §3.1`/§6.4.
     pub fn new(package: impl Into<String>, name: impl Into<String>) -> Self {
         let package = package.into();
         let name = name.into();
@@ -155,6 +165,7 @@ impl Debug for Symbol {
     }
 }
 
+/// Tagged value universe described in `spec/core.md §3`.
 #[derive(Clone)]
 pub enum Value {
     Nil,
@@ -167,6 +178,7 @@ pub enum Value {
     Error(Box<ErrorVal>),
 }
 
+/// Structured error triple per `spec/core.md §3.3`.
 #[derive(Clone)]
 pub struct ErrorVal {
     pub code: Rc<Symbol>,
@@ -181,6 +193,7 @@ impl Debug for ErrorVal {
 }
 
 impl Value {
+    /// Interpret `self` using the predicate rules from `spec/core.md §3.2`.
     pub fn truthy(&self) -> bool {
         match self {
             Value::Nil => false,
@@ -188,11 +201,12 @@ impl Value {
             _ => true,
         }
     }
+    /// Convenience to test whether `self` is a spec error value (`spec/core.md §3.3`).
     pub fn is_error(&self) -> bool {
         matches!(self, Value::Error(_))
     }
 
-    /// Produce the canonical external representation required by §11.
+    /// Produce the canonical external representation required by `spec/core.md §11`.
     pub fn to_canonical(&self) -> String {
         match self {
             Value::Nil => "()".to_string(),
@@ -249,6 +263,7 @@ impl Debug for Value {
     }
 }
 
+/// Apply the escape discipline for canonical printing (`spec/core.md §11`).
 fn escape_canonical_string(input: &str) -> String {
     input
         .chars()
@@ -270,6 +285,7 @@ fn escape_canonical_string(input: &str) -> String {
         .collect()
 }
 
+/// Convert a 4-bit nibble into uppercase hex for canonical escapes (`spec/core.md §11`).
 fn int_to_hex(nibble: u8) -> char {
     match nibble {
         0..=9 => (b'0' + nibble) as char,
@@ -278,6 +294,7 @@ fn int_to_hex(nibble: u8) -> char {
     }
 }
 
+/// Render a symbol using the `package/name` rules from `spec/core.md §11`.
 fn canonical_symbol(sym: &Symbol) -> String {
     let name = canonical_symbol_component(&sym.name);
     if sym.package == "user" {
@@ -288,6 +305,7 @@ fn canonical_symbol(sym: &Symbol) -> String {
     }
 }
 
+/// Escape a symbol component if it contains delimiter characters (`spec/core.md §11`).
 fn canonical_symbol_component(component: &str) -> String {
     if requires_symbol_quoting(component) {
         let escaped: String = component
@@ -304,6 +322,7 @@ fn canonical_symbol_component(component: &str) -> String {
     }
 }
 
+/// Detect whether a symbol needs `|...|` quoting in canonical output (`spec/core.md §11`).
 fn requires_symbol_quoting(component: &str) -> bool {
     component.chars().any(|ch| {
         ch.is_whitespace()
@@ -314,6 +333,7 @@ fn requires_symbol_quoting(component: &str) -> bool {
     })
 }
 
+/// Print a list/dotted pair according to `spec/core.md §11`.
 fn canonical_list(value: &Value) -> String {
     let mut parts = Vec::new();
     let mut cursor = value;
@@ -340,6 +360,7 @@ fn canonical_list(value: &Value) -> String {
 
 // ----------------------------- Reader -----------------------------
 
+/// Helper to produce reader errors per `spec/core.md §2.2/§3.3`.
 fn reader_error(message: &str, payload: Value) -> Value {
     Value::Error(Box::new(ErrorVal {
         code: Rc::new(Symbol::new("error", "reader")),
@@ -348,6 +369,7 @@ fn reader_error(message: &str, payload: Value) -> Value {
     }))
 }
 
+/// Build a proper list from `items`, preserving reader order (`spec/core.md §2.3`).
 fn list_from(items: Vec<Value>) -> Value {
     let mut acc = Value::Nil;
     for item in items.into_iter().rev() {
@@ -356,20 +378,24 @@ fn list_from(items: Vec<Value>) -> Value {
     acc
 }
 
+/// Build a two-element list in evaluation order (`spec/core.md §2.3`).
 fn list2(a: Value, b: Value) -> Value {
     list_from(vec![a, b])
 }
 
+/// Construct a user-package symbol literal per `spec/core.md §2.2`.
 fn symbol(name: &str) -> Value {
     Value::Sym(Rc::new(Symbol::new("user", name)))
 }
 
+/// Stateful reader implementing the grammar from `spec/core.md §2`.
 struct Reader<'a> {
     chars: std::str::Chars<'a>,
     offset: usize,
 }
 
 impl<'a> Reader<'a> {
+    /// Initialize a reader over raw UTF-8 source (`spec/core.md §2.1`).
     fn new(src: &'a str) -> Self {
         Self {
             chars: src.chars(),
@@ -394,6 +420,7 @@ impl<'a> Reader<'a> {
         Some(ch)
     }
 
+    /// Skip whitespace and comments, rejecting carriage returns (`spec/core.md §2.1/§2.2`).
     fn skip_ws(&mut self) -> Result<(), Value> {
         loop {
             let Some(ch) = self.peek() else {
@@ -423,6 +450,7 @@ impl<'a> Reader<'a> {
         }
     }
 
+    /// Consume the entire stream and return the top-level forms (`spec/core.md §2.3`).
     fn read_all(mut self) -> Result<Vec<Value>, Value> {
         let mut out = Vec::new();
         self.skip_ws()?;
@@ -435,6 +463,7 @@ impl<'a> Reader<'a> {
         Ok(out)
     }
 
+    /// Parse a single datum or return `None` at EOF (`spec/core.md §2.3`).
     fn read_form(&mut self) -> Result<Option<Value>, Value> {
         self.skip_ws()?;
         let Some(ch) = self.peek() else {
@@ -534,6 +563,7 @@ impl<'a> Reader<'a> {
         }
     }
 
+    /// Check that a dotted tail is followed by a delimiter (`spec/core.md §2.3`).
     fn after_dot_delimited(&self) -> bool {
         let mut iter = self.chars.clone();
         iter.next();
@@ -543,6 +573,7 @@ impl<'a> Reader<'a> {
         }
     }
 
+    /// Parse an integer literal using the decimal grammar (`spec/core.md §2.2`).
     fn read_number(&mut self) -> Result<Value, Value> {
         let mut repr = String::new();
         if self.peek() == Some('-') {
@@ -573,6 +604,7 @@ impl<'a> Reader<'a> {
         Ok(Value::Int(n))
     }
 
+    /// Parse an unquoted symbol token and validate identifier rules (`spec/core.md §2.2`).
     fn read_symbol(&mut self) -> Result<Value, Value> {
         if self.peek() == Some('|') {
             return self.read_quoted_symbol(None);
@@ -594,6 +626,7 @@ impl<'a> Reader<'a> {
         self.symbol_from_token(token)
     }
 
+    /// Split `token` into package/name and validate per `spec/core.md §2.2`.
     fn symbol_from_token(&mut self, token: String) -> Result<Value, Value> {
         if token == "." {
             return Err(reader_error("unexpected .", Value::Nil));
@@ -616,6 +649,7 @@ impl<'a> Reader<'a> {
         Ok(Value::Sym(Rc::new(Symbol::new(pkg, name))))
     }
 
+    /// Parse `|quoted|` symbol segments and optional explicit package (`spec/core.md §2.2`).
     fn read_quoted_symbol(&mut self, package: Option<String>) -> Result<Value, Value> {
         self.bump();
         let mut buf = String::new();
@@ -644,6 +678,7 @@ impl<'a> Reader<'a> {
         Ok(Value::Sym(Rc::new(Symbol::new("user", buf))))
     }
 
+    /// Parse a string literal, handling escapes as defined in `spec/core.md §2.2`.
     fn read_string(&mut self) -> Result<String, Value> {
         let mut out = String::new();
         loop {
@@ -687,6 +722,7 @@ impl<'a> Reader<'a> {
         Ok(out)
     }
 
+    /// Handle `#` dispatch sequences; only `#u8` exists in v0.1 (`spec/core.md §2.2`).
     fn read_dispatch(&mut self) -> Result<Value, Value> {
         match (self.bump(), self.bump()) {
             (Some('u'), Some('8')) => {
@@ -699,6 +735,7 @@ impl<'a> Reader<'a> {
         }
     }
 
+    /// Parse `#u8(` byte vectors, enforcing 0–255 bounds (`spec/core.md §2.2`).
     fn read_byte_list(&mut self) -> Result<Value, Value> {
         let mut bytes = Vec::new();
         loop {
@@ -727,6 +764,7 @@ impl<'a> Reader<'a> {
     }
 }
 
+/// Characters that terminate tokens per `spec/core.md §2.2`.
 fn is_delimiter(ch: char) -> bool {
     matches!(
         ch,
@@ -734,6 +772,7 @@ fn is_delimiter(ch: char) -> bool {
     )
 }
 
+/// Validate a symbol component using the identifier grammar (`spec/core.md §2.2`).
 fn valid_symbol_name(name: &str) -> bool {
     let mut chars = name.chars();
     let Some(first) = chars.next() else {
@@ -745,6 +784,7 @@ fn valid_symbol_name(name: &str) -> bool {
     chars.all(is_symbol_subsequent)
 }
 
+/// Determine whether `ch` is legal as an initial symbol character (`spec/core.md §2.2`).
 fn is_symbol_initial(ch: char) -> bool {
     is_xid_start(ch)
         || matches!(
@@ -769,10 +809,12 @@ fn is_symbol_initial(ch: char) -> bool {
         )
 }
 
+/// Determine whether `ch` may appear after the first symbol character (`spec/core.md §2.2`).
 fn is_symbol_subsequent(ch: char) -> bool {
     is_xid_continue(ch) || is_symbol_initial(ch) || ch.is_ascii_digit()
 }
 
+/// Parse two hexadecimal digits into a byte; used for string escapes (`spec/core.md §2.2`).
 fn hex_pair(hi: char, lo: char) -> Option<u8> {
     fn digit(c: char) -> Option<u8> {
         match c {
@@ -794,13 +836,14 @@ pub fn read_all(source: &str) -> Result<Vec<Value>, Value> {
 #[cfg(test)]
 mod tests;
 
+/// Render a byte slice as lowercase hex for debugging (`spec/core.md §11`).
 fn hex(b: &[u8]) -> String {
     b.iter().map(|x| format!("{:02x}", x)).collect()
 }
 
 // --------------------- Canonical Encoding --------------------
 
-// Tags (§6.1)
+// Tags (`spec/core.md §6.1`)
 const T_NIL: u8 = 0x00;
 const T_INT: u8 = 0x01;
 const T_STR: u8 = 0x02;
@@ -811,6 +854,7 @@ const T_CLOS: u8 = 0x06; // encoded as pair of hashes per spec
 const T_ERR: u8 = 0x07;
 
 impl Value {
+    /// Serialize the value into canonical TLV bytes (`spec/core.md §6`).
     pub fn encode(&self) -> Vec<u8> {
         match self {
             Value::Nil => vec![T_NIL, 0x00],
@@ -859,7 +903,7 @@ impl Value {
                 out
             }
             Value::Closure(c) => {
-                // Encode as pair of hashes per spec (§6.7)
+                // Encode as pair of hashes per `spec/core.md §6.7`.
                 let pair = Value::Pair(
                     Rc::new(Value::Bytes(c.code_hash.to_vec())),
                     Rc::new(Value::Bytes(c.env_shape_hash.to_vec())),
@@ -886,6 +930,7 @@ impl Value {
         }
     }
 
+    /// Parse a canonical TLV payload back into a value (`spec/core.md §6`).
     pub fn decode(mut bytes: &[u8]) -> Result<(Value, usize)> {
         if bytes.is_empty() {
             return Err(anyhow!("decode: EOF"));
@@ -995,6 +1040,7 @@ impl Value {
         }
     }
 
+    /// Compute the BLAKE3-256 digest of the canonical encoding (`spec/core.md §7`).
     pub fn hash32(&self) -> [u8; 32] {
         let enc = self.encode();
         let mut h = Hasher::new();
@@ -1007,6 +1053,7 @@ impl Value {
 
 // ------------------------- Bytecode --------------------------
 
+/// Instruction set of the stack VM described in `spec/core.md §8.4`.
 #[repr(u8)]
 #[derive(Copy, Clone, Debug, PartialEq, Eq)]
 pub enum Op {
@@ -1071,7 +1118,8 @@ pub enum Op {
     Decode = 0x92,
 }
 
-// Function and module containers (§8.1–8.3)
+// Function and module containers (`spec/core.md §8.1–§8.3`)
+/// Compiled function object per `spec/core.md §8.2`.
 #[derive(Clone)]
 pub struct Function {
     pub arity: u16,
@@ -1079,6 +1127,7 @@ pub struct Function {
     pub code: Vec<u8>,
 }
 
+/// Module container that groups constants, functions, and exports (`spec/core.md §8.1`).
 #[derive(Clone)]
 pub struct Module {
     pub consts: Vec<Value>,
@@ -1129,6 +1178,7 @@ impl Module {
 
 // --------------------- Closures & Frames ---------------------
 
+/// Closure capturing a function index and its environment (`spec/core.md §4/§8.3`).
 #[derive(Clone)]
 pub struct Closure {
     pub module: Rc<Module>,
@@ -1139,6 +1189,7 @@ pub struct Closure {
 }
 
 impl Closure {
+    /// Instantiate a closure over a module function and lexical environment (`spec/core.md §4`).
     pub fn new(module: Rc<Module>, func_idx: u16, env: Vec<Rc<Value>>) -> Self {
         let func = &module.functions[func_idx as usize];
         // code hash: blake3 over function code bytes
@@ -1161,6 +1212,7 @@ impl Closure {
             env_shape_hash: eh,
         }
     }
+    /// Synthesize an opaque closure from hashes for decoding (`spec/core.md §6.7`).
     pub fn opaque(code_hash: [u8; 32], env_hash: [u8; 32]) -> Self {
         Self {
             module: Rc::new(Module {
@@ -1177,6 +1229,7 @@ impl Closure {
     }
 }
 
+/// Activation frame tracking interpreter state (`spec/core.md §8.3`).
 #[derive(Clone)]
 struct Frame {
     module: Rc<Module>,
@@ -1188,12 +1241,14 @@ struct Frame {
 
 // --------------------------- VM ------------------------------
 
+/// Reference bytecode VM implementing the evaluator in `spec/core.md §5/§8`.
 pub struct VM {
     stack: Vec<Rc<Value>>,
     frames: Vec<Frame>,
 }
 
 impl VM {
+    /// Create an empty VM with no modules loaded.
     pub fn new() -> Self {
         Self {
             stack: Vec::new(),
@@ -1201,9 +1256,11 @@ impl VM {
         }
     }
 
+    /// Push a raw value onto the operand stack (`spec/core.md §8.3`).
     fn push(&mut self, v: Value) {
         self.stack.push(Rc::new(v));
     }
+    /// Pop the stack, producing a reader-style error value on underflow (`spec/core.md §8.3`).
     fn pop(&mut self) -> Rc<Value> {
         self.stack.pop().unwrap_or_else(|| {
             Rc::new(Value::Error(Box::new(ErrorVal {
@@ -1214,10 +1271,12 @@ impl VM {
         })
     }
 
+    /// Borrow the current activation frame; VM invariants guarantee it exists.
     fn current_mut(&mut self) -> &mut Frame {
         self.frames.last_mut().expect("no frame")
     }
 
+    /// Resolve `export` in `module` and invoke it as the program entry (`spec/core.md §12`).
     pub fn call_main(&mut self, module: Rc<Module>, export: &Symbol) -> Value {
         let Some((_, idx)) = module.export(export) else {
             return Value::Error(Box::new(ErrorVal {
@@ -1230,17 +1289,20 @@ impl VM {
         self.apply_closure(Rc::new(clos), &[])
     }
 
+    /// Read a big-endian `u16` operand and advance the instruction pointer.
     fn load_u16(code: &[u8], ip: &mut usize) -> u16 {
         let v = u16::from_be_bytes([code[*ip], code[*ip + 1]]);
         *ip += 2;
         v
     }
+    /// Read a big-endian `i16` operand and advance the instruction pointer.
     fn load_i16(code: &[u8], ip: &mut usize) -> i16 {
         let v = i16::from_be_bytes([code[*ip], code[*ip + 1]]);
         *ip += 2;
         v
     }
 
+    /// Structural equality predicate backing `equal?` (`spec/core.md §5.6`).
     fn value_eq(a: &Value, b: &Value) -> bool {
         match (a, b) {
             (Value::Int(x), Value::Int(y)) => x == y,
@@ -1263,6 +1325,7 @@ impl VM {
         }
     }
 
+    /// Extract a big integer or raise a typed error (`spec/core.md §5.2`).
     fn as_int(v: &Value) -> Result<BigInt> {
         if let Value::Int(n) = v {
             Ok(n.clone())
@@ -1271,6 +1334,7 @@ impl VM {
         }
     }
 
+    /// Execute a primitive opcode by mutating the stack (`spec/core.md §5`).
     fn apply_primitive(&mut self, op: Op) {
         use Value::*;
         let err = |code: &str, msg: &str, payload: Value| -> Value {
@@ -2063,6 +2127,7 @@ fn bit_width(n: &BigInt) -> usize {
 fn choose_width(a: &BigInt, b: &BigInt) -> usize {
     bit_width(a).max(bit_width(b))
 }
+/// Shared helper to implement `(bit-and ...)` semantics (`spec/core.md §5.4`).
 fn bitop_and(a: &BigInt, b: &BigInt) -> BigInt {
     let w = choose_width(a, b);
     let (ab, bb) = (
@@ -2077,6 +2142,7 @@ fn bitop_and(a: &BigInt, b: &BigInt) -> BigInt {
     }
     be_twos_complement_to_bigint(&out)
 }
+/// Shared helper to implement `(bit-or ...)` semantics (`spec/core.md §5.4`).
 fn bitop_or(a: &BigInt, b: &BigInt) -> BigInt {
     let w = choose_width(a, b);
     let aw = to_fixed_width(&be_twos_complement_from_bigint(a), w);
@@ -2087,6 +2153,7 @@ fn bitop_or(a: &BigInt, b: &BigInt) -> BigInt {
     }
     be_twos_complement_to_bigint(&out)
 }
+/// Shared helper to implement `(bit-xor ...)` semantics (`spec/core.md §5.4`).
 fn bitop_xor(a: &BigInt, b: &BigInt) -> BigInt {
     let w = choose_width(a, b);
     let aw = to_fixed_width(&be_twos_complement_from_bigint(a), w);
