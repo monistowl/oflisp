@@ -71,7 +71,7 @@ oflisp/
 │   ├── assembler.rs    # S-expression assembler
 │   └── lib.rs          # (optional) shared structures
 └── examples/
-├── demo.sld        # Example assembled module
+├── demo.ofl        # Example assembled module
 └── repl/           # Placeholder for future REPL
 
 ````
@@ -129,7 +129,7 @@ You can assemble OFLISP modules directly from S-expressions using the built-in a
 Assemble and run:
 
 ```bash
-cargo run --example assemble examples/demo.sld
+cargo run --example assemble examples/demo.ofl
 ```
 
 ---
