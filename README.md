@@ -194,10 +194,3 @@ You are free to use, modify, and distribute OFLISP under the terms of the MIT li
 ---
 
 > *OFLISP is not a language runtime — it’s an experiment in formal, deterministic computation. The aim is to make personal computing reproducible and fully inspectable from the bottom up.*
-
-```
-
----
-
-Would you like me to add a **quickstart tutorial** (building, assembling, running a new function) and example assembler output for the next revision of the README?
-```
