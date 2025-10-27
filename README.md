@@ -27,9 +27,9 @@ OFLISP is specified so that **identical inputs always produce identical outputs*
 | Component | Description |
 |------------|--------------|
 | **OFLISP Core Spec** | Defines the formal data model, semantics, and bytecode format. |
-| **Reference VM** | A Rust interpreter implementing the entire deterministic execution model. |
-| **Assembler** | A minimal Lisp-style assembler that builds bytecode modules from S-expressions. |
-| **Capsules (planned)** | Portable, signed bundles for code and data — analog of Urbit “pills.” |
+| **Reference VM** | A Rust interpreter implementing the deterministic execution model. Present in `src/main.rs`; currently runs a hard-coded demo program. |
+| **Assembler (unfinished)** | Planned minimal Lisp-style assembler for building bytecode modules from S-expressions. The repository does not yet include `src/assembler.rs`, so modules must be authored directly in Rust for now. |
+| **Capsules (planned)** | Portable, signed bundles for code and data — analog of Urbit “pills.” Not yet implemented; specs exist but runtime support is pending. |
 
 ---
 
@@ -67,14 +67,22 @@ oflisp/
 ├── README.md
 ├── Cargo.toml
 ├── src/
-│   ├── main.rs         # Reference VM and runtime
-│   ├── assembler.rs    # S-expression assembler
-│   └── lib.rs          # (optional) shared structures
-└── examples/
-├── demo.ofl        # Example assembled module
-└── repl/           # Placeholder for future REPL
+│   └── main.rs         # Reference VM and runtime (assembler TBD)
+├── spec/               # Draft subsystem specifications
+└── spec.md             # Specification index
 
 ````
+
+Additional directories referenced in the roadmap (e.g., `examples/`, `repl/`, or `src/assembler.rs`) are still on the drawing board and will land alongside the assembler and capsule tooling work.
+
+---
+
+## Current Limitations & Open Work
+
+* **Assembler gap:** Bytecode must currently be embedded in Rust because the planned assembler module has not been implemented.
+* **No persistence yet:** The VM runs in-memory only; persistent heaps, event logs, and deterministic scheduling remain future work.
+* **Single-agent demo:** There is no capsule loader, agent runtime, or networking layer; the shipped binary simply executes a demo program.
+* **Spec/implementation drift:** Several sections of `spec/` describe capsules, schedulers, and storage subsystems that have not been realized. Treat them as design notes rather than executable features.
 
 ---
 
@@ -94,7 +102,7 @@ cd oflisp
 cargo run
 ````
 
-This will compile and execute the demo module in `main.rs`, which computes `((1 + 2) * 3)` using bytecode instructions and halts with the result.
+This compiles and executes the reference VM defined in `src/main.rs`. The current binary embeds a simple bytecode sample that computes `((1 + 2) * 3)` and halts with the result. External module loading and assembly from S-expressions remain TODO until the assembler lands.
 
 ---
 
@@ -108,7 +116,7 @@ Result: 9
 
 ## Writing Programs
 
-You can assemble OFLISP modules directly from S-expressions using the built-in assembler:
+You will be able to assemble OFLISP modules directly from S-expressions using the planned assembler:
 
 ```lisp
 (module
@@ -126,7 +134,7 @@ You can assemble OFLISP modules directly from S-expressions using the built-in a
   (exports (export user main 0)))
 ```
 
-Assemble and run:
+Assemble and run (future workflow):
 
 ```bash
 cargo run --example assemble examples/demo.ofl
@@ -149,24 +157,26 @@ OFLISP guarantees identical results for identical inputs via:
 
 ## Development Roadmap
 
-**v0.1 — MVP (Complete)**
+**v0.1 — MVP (In Progress)**
 
-* Deterministic data model (atoms, pairs, closures, errors).
-* Canonical encoding and hashing.
-* Reference bytecode VM in Rust.
-* Minimal assembler and demo module.
+* Deterministic data model (atoms, pairs, closures, errors). ✅ Implemented in the reference VM.
+* Canonical encoding and hashing. ✅ Implemented in the VM and supporting utilities.
+* Reference bytecode VM in Rust. ✅ `src/main.rs` hosts an interpreter capable of running embedded bytecode sequences.
+* Minimal assembler and demo module. ⚠️ Assembler not yet implemented; demo bytecode is hard-coded in Rust.
 
-**v0.2 — Kernel Phase**
+**v0.2 — Kernel Phase (designing the persistent runtime)**
 
-* Persistent heap & snapshot replay.
-* Event log and deterministic scheduling.
-* System calls (IO as pure intents).
+* **Persistent heap & snapshot replay:** introduce an append-only arena on disk plus checkpoint files so the VM can restart from canonical state roots. Requires defining a `storage::` module that serializes value graphs via the TLV format.
+* **Event log and deterministic scheduling:** add a journaled queue for incoming messages (`inbox.log`) and a scheduler loop that replays intents deterministically, persisting execution results as new log entries.
+* **System calls as pure intents:** design an intent schema describing IO requests (timers, networking, filesystem). Implement a host shim that records intents and injects responses via the event log, keeping VM execution pure.
+* **Assembler integration:** land the S-expression assembler and extend `cargo run` to load `.ofl` capsules or bytecode bundles from disk rather than relying on embedded demos.
 
-**v0.3 — Networked Ships**
+**v0.3 — Networked Ships (bootstrapping the distributed system)**
 
-* Cryptographic identities and peer messaging.
-* Signed capsules and migrations.
-* Lisp runtime for agent communication.
+* **Cryptographic identities and peer messaging:** add key management (Ed25519) and signed envelopes for ship-to-ship communication. Extend the scheduler to enqueue network messages into the event log.
+* **Signed capsules and migrations:** define a capsule manifest format, implement signing/verification, and teach the runtime to hot-load capsule upgrades via the persistent heap infrastructure.
+* **Lisp runtime for agent communication:** provide a standard library of agent combinators and messaging utilities, plus an interpreter loop for concurrent agent execution with backpressure.
+* **Network bootstrap tooling:** ship CLI utilities for provisioning keys, seeding trust anchors, and configuring peers, enabling ships to discover and verify each other deterministically.
 
 **v1.0 — Self-Hosting**
 
