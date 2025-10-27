@@ -2,7 +2,7 @@
 
 **Version:** 0.1  
 **License:** MIT  
-**Author:** (Your Name Here)  
+**Author:** Tom Wilson  
 **Language:** Rust (reference VM + assembler)  
 
 ---
