@@ -1,0 +1,11 @@
+// [package]
+// name = "oflisp-vm"
+// version = "0.1.0"
+// edition = "2021"
+//
+// [dependencies]
+// blake3 = "1"
+// num-bigint = "0.4"
+// num-traits = "0.2"
+// anyhow = "1"
+// thiserror = "1"
