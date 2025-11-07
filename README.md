@@ -1,8 +1,8 @@
 # OFLISP — Operating Function LISP
 
-**Version:** 0.1  
+**Version:** -0.1  (unstable)
 **License:** MIT  
-**Author:** Tom Wilson  
+**Author:** Alan Smithee
 **Language:** Rust (reference VM + assembler)  
 
 ---
